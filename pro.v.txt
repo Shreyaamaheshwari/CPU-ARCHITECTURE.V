@@ -1,0 +1,63 @@
+`timescale 1ns / 1ps
+module spi_master_dac (
+    input  wire clk,        // System clock (e.g., 50 MHz)
+    input  wire reset_n,    // Active-low reset
+    input  wire start,      // Start transmission
+    input  wire [15:0] data_in, // 16-bit data to DAC
+    output reg  MOSI,       // SPI MOSI
+    output reg  SCLK,       // SPI Clock
+    output reg  CS,         // Chip Select (active low)
+    output reg  done        // Transmission complete
+);
+
+    // Parameters
+    parameter CLK_DIV = 4;  // Divide system clock for SCLK
+    reg [15:0] shift_reg;
+    reg [4:0]  bit_cnt;
+    reg [2:0]  clk_div_cnt;
+    reg busy;
+
+    // State machine
+    always @(posedge clk or negedge reset_n) begin
+        if (!reset_n) begin
+            SCLK <= 0;
+            CS   <= 1;
+            MOSI <= 0;
+            shift_reg <= 0;
+            bit_cnt <= 0;
+            clk_div_cnt <= 0;
+            busy <= 0;
+            done <= 0;
+        end else begin
+            done <= 0;
+
+            if (start && !busy) begin
+                busy <= 1;
+                CS   <= 0;              // Enable DAC
+                shift_reg <= data_in;
+                bit_cnt <= 16;
+            end
+
+            if (busy) begin
+                clk_div_cnt <= clk_div_cnt + 1;
+
+                if (clk_div_cnt == (CLK_DIV-1)) begin
+                    clk_div_cnt <= 0;
+                    SCLK <= ~SCLK; // Toggle SPI clock
+
+                    if (SCLK == 0) begin
+                        MOSI <= shift_reg[15];       // Output MSB first
+                        shift_reg <= {shift_reg[14:0], 1'b0};
+                        bit_cnt <= bit_cnt - 1;
+                    end
+                end
+
+                if (bit_cnt == 0 && SCLK == 1) begin
+                    busy <= 0;
+                    CS   <= 1;  // Disable DAC
+                    done <= 1;  // Transmission done
+                end
+            end
+        end
+    end
+endmodule
